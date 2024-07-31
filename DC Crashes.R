@@ -34,8 +34,8 @@ library("dplyr")
 data <- read.csv("/Users/sz/Desktop/OMSA/MGT6203/Project/Crashes_in_DC.csv")
 
 # Data dimension: 289063 rows and 58 attributes
-# str(data)
-# dim(data)
+str(data)
+dim(data)
 
 ### DATA CLEANING ###
 
@@ -72,7 +72,6 @@ data <-data[!data$WARD %in% c("UNKNOWN",  "Null"),]
 
 # remove 11715 rows, ending with 274885 rows
 data <- data %>% filter(ROUTEID != "Route not found")
-
 
 # check which ID to use 
 # length(unique(data$CCN))
@@ -134,7 +133,7 @@ df_w <-df_w %>% mutate (WT01 = ifelse(is.na(WT01), 0,1))
 df_w<-df_w %>% mutate(WT03 = ifelse(is.na(WT03), 0,1))
 
 
-# change date type and create Year column
+# change date type from factor to date, and create Year column
 df_w$Date.y <- as.Date(df_w$DATE)
 df_w$Year.y <- year(as.Date(df_w$DATE))
 
@@ -225,6 +224,8 @@ weather.data <- df_all %>% dplyr::select(AWND, PRCP, SNOW, SNWD, TMAX, TMIN, WT0
 weather.corr <- cor(weather.data)
 corrplot(weather.corr, type="upper", order="hclust")
 
+
+
 # strong correlations between TMAX and TMIN, Precipitation and Fog, Snow and snow depth;
 # remove TMAX, Fog, thunder, snow depth attributes
 
@@ -247,7 +248,11 @@ df_all <- df_all %>% mutate(IsFreezing = ifelse(TMIN <32, 1,0))
 df_all <- df_all %>% mutate(IsSnow = ifelse(SNOW >0, 1,0))
 df_all <- df_all %>% mutate(IsRain = ifelse(PRCP >0, 1, 0))
 
-# # transform snow to a multi-category variable
+# weather statistics
+# Freezing at 11% of dates, Snow at 2% of dates, Rain at 33% of dates
+df_all %>% summarise(mean(IsFreezing), mean(IsSnow), mean(IsRain)) %>% as_tibble()
+
+## transform snow to a multi-category variable
 df_all <-df_all %>% mutate(SNOW_Type = case_when(SNOW == 0 ~ "NoSnow", SNOW <= 3 & SNOW >0 ~ "Less than 3",
                                                  SNOW >3 & SNOW <=6 ~ "Less than 6", SNOW > 6 ~ "More than 6"))
 
@@ -263,26 +268,29 @@ df_all <- df_all %>% mutate(IsFatal = rowSums(across (starts_with("FATAL")))) %>
 df_all <- df_all %>% mutate(IsMajor= rowSums(across (starts_with("MAJOR")))) %>% mutate (IsMajor = ifelse(IsMajor == 0, 0,1))
 
 # check fatal accident rates and counts
-# mean(df_all$IsFatal)
-# mean(df_all$IsMajor)
- 
-# df_all %>% count(IsFatal)
-# df_all %>% count(IsMajor)
+mean(df_all$IsFatal)
+mean(df_all$IsMajor)
+df_all %>% count(IsFatal)
+df_all %>% count(IsMajor)
 
 # roll up "IsFatal" and "IsMajor" into single variable "IsSevere"
-df_all <- df_all %>% mutate(IsSevere = rowSums(across(c("IsFatal", "IsMajor"))))%>% mutate(IsSevere = ifelse(IsSevere == 0,0,1))
+df_all <- df_all %>% mutate(IsSevere = rowSums(across(c("IsFatal", "IsMajor"))))%>% mutate(IsSevere = if_else(IsSevere == 0,0,1))
 # check "IsSevere" accident rate and counts (IsSevere = IsFatal+IsMajor)
+mean(df_all$IsSevere)
 
 # transform "PEDESTRIANSIMPAIRED", "DRIVERSIMPAIRED", "BICYCLISTSIMPAIRED" into "IsImpaired" variable
 df_all <- df_all %>% mutate(
           IsImpaired = rowSums(across(c("PEDESTRIANSIMPAIRED", "DRIVERSIMPAIRED", "BICYCLISTSIMPAIRED")))
-          ) %>% mutate(IsImpaired = ifelse(IsImpaired == 0 ,0, 1)
+          ) %>% mutate(IsImpaired = if_else(IsImpaired == 0 ,0, 1)
       )
 # check "IsImpaired" accidents rate and counts
+mean(df_all$IsImpaired)
 
 # transform "SPEEDINGINVOLVED" to a binary variable "IsSpeeding"
-df_all <- df_all %>% mutate(IsSpeeding = ifelse(SPEEDING_INVOLVED == 0, 0, 1))
-# show means and counts in tibble
+df_all <- df_all %>% mutate(IsSpeeding = if_else(SPEEDING_INVOLVED == 0, 0, 1))
+
+# show means and counts of IsImpaired, IsSpeeding, IsSevere in tibble
+# IsImpaired at 1.84% of data, IsSpeeding at 1.71% of data, IsSevere at 6.75% of Data
 df_all %>%summarize(mean(IsImpaired), mean(IsSpeeding), mean(IsSevere)) %>% as_tibble()
 
 # add variable to indicate the Covid years (2020, 2021, 2022)
@@ -294,31 +302,31 @@ df_all <- df_all%>% mutate_at(c("CRIMEID", "SNOW_Type", "PRCP_Type"), as.factor)
 
 ### CREATE TWO DATASETS ###
 
-## AGGREGATE CRIMEID BY DATE, ADD Accident_Total, Impaired_Perc, Speeding_Perc variables
-df_vol <- df_all %>% group_by( Date, WeekDay, Month, Year, AWND, PRCP, SNOW, TMIN, 
+## AGGREGATE CRIMEID BY DATE, ADD Accident_Total, Impaired_Total, Speeding_Total variables
+df_vol <- df_all %>% group_by( Date, WeekDay, Month, Year, AWND, PRCP, SNOW, TMIN,
                                PRCP_Type, SNOW_Type, IsFreezing, IsSnow, IsRain, IsCovid
-                                )%>% summarise(Accident_Total =n(), 
-                                              Impaired_Perc = sum(IsImpaired)/Accident_Total, 
-                                              Speeding_Perc = sum(IsSpeeding)/Accident_Total)
+                                )%>% summarise(Accident_Total =n(),
+                                              Impaired_Total = sum(IsImpaired),
+                                              Speeding_Total = sum(IsSpeeding))
 
-
-
-# normalize Accident Volume data
+  
+# normalize Accident Volume data (can't normalize binary values)
 df_vol_normalized <- as.data.frame(sapply(df_vol[, c("Accident_Total",
-                                                     "Impaired_Perc",
-                                                     "Speeding_Perc",
+                                                     "Impaired_Total",
+                                                     "Speeding_Total",
                                                      "AWND", "PRCP", "SNOW", "TMIN")], scale))
 df_vol_normalized <- cbind(df_vol_normalized, Date = df_vol$Date, WeekDay =df_vol$WeekDay, Month = df_vol$Month, Year =df_vol$Year)
                                           
 
 ### Roll UP BY DATE, ADD Accident_Total, Impaired_Perc, Speeding_Perc, Severe_Perc variables ###
-
-df_vol_Severe <- df_all %>% group_by(Date, WeekDay, Month, Year, AWND, PRCP, SNOW, TMIN, 
+df_vol_Severe <- df_all %>% group_by(Date, WeekDay, Month, Year, AWND, PRCP, SNOW, TMIN,
                                      PRCP_Type, SNOW_Type, IsFreezing, IsSnow, IsRain, IsCovid
-                                      ) %>% summarise (Accident_Total =n(), 
-                                                      Impaired_Perc = sum(IsImpaired)/Accident_Total, 
+                                      ) %>% summarise (Accident_Total =n(),
+                                                      Impaired_Perc = sum(IsImpaired)/Accident_Total,
                                                       Speeding_Perc = sum(IsSpeeding)/Accident_Total,
-                                                      Severe_Perc = sum(IsSevere)/Accident_Total)                                           
+                                                      Severe_Perc = sum(IsSevere)/Accident_Total)
+
+
 
 # normalize Severity data
 df_vol_Severe_normalized <- as.data.frame(sapply(df_vol_Severe[, c("Severe_Perc",
@@ -368,8 +376,16 @@ df_vol_Severe_normalized_test <- df_vol_Severe_normalized %>% filter(Year ==2022
 df_vol_Severe_train_2 <- df_vol_Severe %>% filter(Year <2019 & Year >= 2016)
 df_vol_Severe_test_2 <- df_vol_Severe %>% filter (Year ==2019)
 
+## Descriptive Analytics on imbalanced data IsSnow, IsFreezing, IsImpaired, IsSpeeding
+# df_vol_train data set displays similar imbalanced distributions in weather and crash features
+# IsSnow at 2% of data, IsFreezing 11%, IsRain 34%, Impaired at 2.89%, Speeding at 1.1%
+library(plyr) # to show summarised stats by grouped data
+df_vol_train %>% summarise(mean(IsSnow), mean(IsFreezing), mean(IsRain), 
+                           sum(Impaired_Total)/sum(Accident_Total), sum(Speeding_Total)/sum(Accident_Total)
+                           ) %>% as_tibble()
 
 ## Descriptive Analytics on Accident_Total and Severe_Perc response variables vs. weather variables
+## Show weak linear relationship between Accident_Total and weather variables
 AWND.sc <- ggplot(df_vol_train, aes(x=AWND, y = Accident_Total)) + geom_point()
 PRCP.sc <- ggplot(df_vol_train, aes(x=PRCP, y = Accident_Total))+ geom_point()
 SNOW.sc <- ggplot(df_vol_train, aes(x=SNOW, y = Accident_Total)) + geom_point()
@@ -393,7 +409,6 @@ weather.n.sc
 # Weather features have large influential points and very weak R-square with Accident_Total
 # Cook's Distance tests on normalized weather features
 AWND.lm <- lm(Accident_Total ~ AWND, data = df_vol_train)
-
 summary(AWND.lm) #insignificant
 PRCP.lm <- lm(Accident_Total ~PRCP, data = df_vol_train)
 summary(PRCP.lm) #insignificant, adj.R very low
@@ -401,10 +416,10 @@ SNOW.lm <- lm(Accident_Total ~SNOW, data = df_vol_train)
 summary(SNOW.lm) #significant, adj.R 0.0056
 TMIN.lm <- lm(Accident_Total ~TMIN, data = df_vol_train)
 summary(TMIN.lm) # signficant, adj. R 0.0277
-Impaired.lm <- lm(Accident_Total ~ Impaired_Perc, data = df_vol_train)
-summary(Impaired.lm) # significant, adj. R 0.0248
-Speeding.lm <- lm(Accident_Total ~ Speeding_Perc, data = df_vol_train)
-summary(Speeding.lm) # signficant, adj. R 0.0384
+Impaired.lm <- lm(Accident_Total ~ Impaired_Total, data = df_vol_train)
+summary(Impaired.lm) # significant, adj. R 0.01857
+Speeding.lm <- lm(Accident_Total ~ Speeding_Total, data = df_vol_train)
+summary(Speeding.lm) # insignficant, adj. R 0.0384
 
 n = nrow(df_vol_train)
 AWND.cooksD <- fortify(AWND.lm) %>% ggplot(aes(seq_along(.cooksd), y= .cooksd)) +
@@ -429,23 +444,24 @@ summary(AWND.lm.n) #insignificant
 PRCP.lm.n <- lm(Accident_Total ~PRCP, data = df_vol_normalized_train)
 summary(PRCP.lm.n) #insignificant
 SNOW.lm.n <- lm(Accident_Total ~SNOW, data = df_vol_normalized_train)
-summary(SNOW.lm.n) #significant, adj.R 0.0056
+summary(SNOW.lm.n) #significant, adj.R 0.0056, but NEGATIVE coefficient -0.0682
 TMIN.lm.n <- lm(Accident_Total ~TMIN, data = df_vol_normalized_train)
-summary(TMIN.lm.n) # significant, adj. R 0.0277
-Impaired.lm.n <- lm(Accident_Total ~ Impaired_Perc, data = df_vol_normalized_train)
-summary(Impaired.lm.n) # significant, adj. R 0.0248
-Speeding.lm.n <- lm(Accident_Total ~ Speeding_Perc, data = df_vol_normalized_train)
-summary(Speeding.lm.n) # signficant, adj. R 0.0384
+summary(TMIN.lm.n) # significant, adj. R 0.0277, positive coefficient
+Impaired.lm.n <- lm(Accident_Total ~ Impaired_Total, data = df_vol_normalized_train)
+summary(Impaired.lm.n) # significant, adj. R 0.01857
+Speeding.lm.n <- lm(Accident_Total ~ Speeding_Total, data = df_vol_normalized_train)
+summary(Speeding.lm.n) # insignficant, adj. R 0.0384
+
 
 # check IsSnow, IsRain, IsFreezing models 
 # regressing Accident_Total against weather filtered by IsSnow, IsRain, IsFreezing shows largely insiginificant, except for SNOW
 df_vol.IsSnow <- filter(df_vol_train, IsSnow ==1)
 IsSnow.model <-lm(Accident_Total~SNOW, data = df_vol.IsSnow)
-summary(IsSnow.model) # significant, adj. R 0.11
+summary(IsSnow.model) # significant, adj. R 0.11, negative coefficient
 
 df_vol.IsRain <- filter(df_vol_train, IsRain ==1)
 IsRain.model <-lm(Accident_Total~PRCP, data = df_vol.IsRain)
-summary(IsRain.model) # insignificant
+summary(IsRain.model) # insignificant negative coefficient
 
 df_vol.IsFreezing <- filter(df_vol_train, IsFreezing ==1)
 IsFreezing.model <-lm(Accident_Total ~ TMIN, data = df_vol.IsFreezing)
@@ -480,10 +496,10 @@ model_PRCP <- lm(Accident_Total ~ PRCP, data = df_vol_train)
 summary(model_PRCP) # not significant, adj. R very low
 
 model_PRCP_SNOW <-lm(Accident_Total ~ PRCP + SNOW, data = df_vol_train)
-summary(model_PRCP_SNOW) # SNOW significant, adj.R 0.005
+summary(model_PRCP_SNOW) # SNOW significant, adj.R 0.005, negative coefficient
 
 model_PRCP_SNOW_TMIN <-lm(Accident_Total ~ PRCP + SNOW + TMIN, data = df_vol_train)
-summary(model_PRCP_SNOW_TMIN) # SNOW & TMIN significant, adj.R 0.03161
+summary(model_PRCP_SNOW_TMIN) # SNOW & TMIN significant, adj.R 0.03157
 
 model_PRCP_SNOW_TMIN_AWND <- lm(Accident_Total ~ PRCP + SNOW + TMIN + AWND, data = df_vol_train)
 summary(model_PRCP_SNOW_TMIN_AWND) # SNOW, TMIN, AWND significant, adj.R 0.03621
@@ -503,10 +519,10 @@ summary(model_weatherFactor) # weather factors don't improve adj. R; adj. R 0.01
 
 
 # build stepwise model on weather and crash variables
-# Adj. R improves to 0.1011, crash features explain about 6% of data variability
+# Adj. R improves to 0.0558, crash features explain about 2% of data variability
 # in the Stepwise model, all variables are significant, but AWND and PRCP add the least value to reduce AIC
 model_min <- lm(Accident_Total ~1, data = df_vol_train)
-model_weather_crash <- lm(Accident_Total ~ SNOW + TMIN + PRCP + AWND + Impaired_Perc + Speeding_Perc, 
+model_weather_crash <- lm(Accident_Total ~ SNOW + TMIN + PRCP + AWND + Impaired_Total + Speeding_Total, 
                           data = df_vol_train)
 
 stepAIC(model_min, direction = 'forward', scope = formula(model_weather_crash), trace = TRUE)
@@ -515,24 +531,38 @@ summary(model_weather_crash)
 # modeling on weather, crash, and date variables (WeekDay, Month)
 # stepwise feature selection analysis
 # in the Stepwise model, all variables are significant, but AWND and PRCP add the least value to reduce AIC
-# adj. R 0.1772, WeekDay and Month explain additional 8.5% of data variability
-model_max<-lm(Accident_Total ~ SNOW + TMIN +PRCP + AWND + Impaired_Perc + Speeding_Perc +
+# adj. R 0.1679, WeekDay and Month explain additional 12% of data variability
+model_max<-lm(Accident_Total ~ SNOW + TMIN +PRCP + AWND + Impaired_Total + Speeding_Total +
                 WeekDay + Month, data = df_vol_train)
 stepAIC(model_min, direction = 'forward', scope = formula(model_max), trace = TRUE)
 summary(model_max) 
 
+# model_max using Weekday and Month only features
+# adj. R 0.1219, WeekDay and Month have enough predicting power
+model_max<-lm(Accident_Total ~ WeekDay + Month, data = df_vol_train)
+stepAIC(model_min, direction = 'forward', scope = formula(model_max), trace = TRUE)
+summary(model_max) 
+
+# model_max using crash features only
+# adj. R 0.0186, Impaired_Total is significant, Speeding_Total is insignificant
+model_max<-lm(Accident_Total ~ Impaired_Total + Speeding_Total, data = df_vol_train)
+stepAIC(model_min, direction = 'forward', scope = formula(model_max), trace = TRUE)
+summary(model_max)
+
+
 # model_max using normalized dataset
-# same significant variables, same adj. R, but with smaller coefficents
-model_max_normalized <- lm(Accident_Total ~ SNOW + TMIN +PRCP + AWND + Impaired_Perc + Speeding_Perc +
+# same significant variables, same adj. R (0.1679), but with smaller coefficents
+model_max_normalized <- lm(Accident_Total ~ SNOW + TMIN +PRCP + AWND + Impaired_Total + Speeding_Total +
                              WeekDay + Month, data = df_vol_normalized_train)
 summary(model_max_normalized)
+
 
 # prepare test dataset excluding Covid period
 # significant variables are the same, but adj. R increased to 0.3506!
 # AIC is significantly lower!
 # in the Stepwise model, SNOW, TMIN, crash variables, WeekDay, Month are significant; AWND and PRCP are insignificant
 model_min_PreCovid <- lm(Accident_Total~1, data = df_vol_train_2)
-model_max_PreCovid<-lm(Accident_Total ~ SNOW + TMIN + PRCP + AWND + Impaired_Perc + Speeding_Perc +
+model_max_PreCovid<-lm(Accident_Total ~ SNOW + TMIN + PRCP + AWND + Impaired_Total + Speeding_Total +
                       WeekDay + Month, data = df_vol_train_2)
 model_min_PreCovid <- lm(Accident_Total~1, data = df_vol_train_2)
 summary(model_max_PreCovid) 
@@ -564,14 +594,14 @@ summary(cv.model$finalModel)
 coef(cv.model$finalModel, 10)
 
 ### CONCLUDE BEST MODEL IS: 
-Best_Model_vol <-lm(Accident_Total ~SNOW + TMIN + WeekDay + Month + Impaired_Perc + Speeding_Perc, df_vol_train) 
+Best_Model_vol <-lm(Accident_Total ~SNOW + TMIN + WeekDay + Month + Impaired_Total, df_vol_train) 
 coef(Best_Model_vol)
 
 ## predict on test set ##
 # set test set
 df_vol_test <- df_vol_test[, !names(df_vol_test) %in% df_vol_train_drop]
 # fit training set
-fit_df_vol_cv <-lm(Accident_Total ~SNOW + TMIN + WeekDay + Month + Impaired_Perc + Speeding_Perc, data = df_vol_train)
+fit_df_vol_cv <-lm(Accident_Total ~SNOW + TMIN + WeekDay + Month + Impaired_Total, data = df_vol_train)
 
 ## measure model performance ##
 # MSE of training set is 218.694
@@ -590,7 +620,7 @@ print(df_vol_pred_MSE)
 df_vol_pred_MAE<- sum(abs(result_df_vol_test$pred - result_df_vol_test$actual)/result_df_vol_test$actual)/nrow(result_df_vol_test)*100
 print(df_vol_pred_MAE) 
 
-# R-Square 16.94%
+# R-Square 10.51%
 result_df_vol_test.SSR <- sum((result_df_vol_test$pred - mean(result_df_vol_test$pred))^2)
 result_df_vol_test.TSS <- sum((mean(result_df_vol_test$pred) - result_df_vol_test$actual)^2)
 result_df_vol_test.R <- result_df_vol_test.SSR/result_df_vol_test.TSS
